@@ -53,7 +53,7 @@ Maze Solver Bot/              # Quartus project and Verilog sources
     uart_tx.v / uart_rx.v    # UART transmitter / receiver
     l298_module.v            # Interface to L298 motor driver
     servo_motor.v            # Servo PWM driver
-    centre_aligner.v         # Centering helper logic (line/IR based)
+    centre_aligner.v         # Centering / alignment logic
     u_filter.v               # Utility filter module (debounce/cleanup)
     bluetooth.v              # Bluetooth comms interface
 Resources/                   # Datasheets and board manual
@@ -76,9 +76,9 @@ How it fits together: the top-level `topmodule.v` instantiates sensor interfaces
 Open these files to understand how inputs map to outputs and to adapt timings or pin assignments.
 
 ## Simulation & testing
-- Create simple testbenches for individual modules and run them in ModelSim (or Questa/Modelsim-Altera) or use the Quartus NativeLink simulation flow.
+- Create simple testbenches for individual modules and run them in ModelSim/Questa or use the Quartus NativeLink simulation flow.
 - The Quartus project contains a NativeLink simulation report (`*.rpt`) indicating prior simulation runs; use that as a starting point.
-- Focus simulation on `t1b_ultrasonic.v`, `uart_tx.v`, `move_controller.v` and the `topmodule.v` skeleton.
+- Focus simulation on timing-sensitive modules: `t1b_ultrasonic.v`, `uart_tx.v`, `move_controller.v` and the `topmodule.v` harness.
 
 ## Wiring & sensors (high-level)
 The design expects a mobile robot platform equipped with:
@@ -94,25 +94,16 @@ Check `Maze Solver Bot/t2c_maze_explorer.qsf` for the exact FPGA pin mappings us
 ## Demo
 See `Demo Video.mp4` at the repository root for a recorded run of the assembled robot performing maze exploration.
 
+See it on YouTube: https://youtu.be/hfJg5jYmMrU?si=1RFYLNTxfjBVxnvM — this video shows the robot navigating and solving a maze using the FPGA-based controller (sensor reads, decision-making and motor control in action).
+
 ## Resources & references
 - DE0-Nano manual: Resources/de0_nano_manual.pdf
 - DHT11 datasheet: Resources/DHT11-datasheet.pdf
 - Capacitive soil moisture sensor datasheet: Resources/capacitive-soil-moisture-sensor-datasheet.pdf
 
-## Contributing
-Contributions are welcome. Typical improvements include:
-- Adding or improving testbenches and simulation scripts.
-- Updating pin assignments in the .qsf for other hardware revisions.
-- Cleaning up or documenting state machines and packet formats.
-
-If you want me to open any specific file and add inline documentation or a testbench, tell me which module and I'll prepare it.
-
-## License
-No license is included in this repository. If you want a permissive license, consider adding an MIT or Apache-2.0 LICENSE file. I can add one for you if you’d like.
-
 ---
 
-If you'd like, I can now:
-- Add this README to the repository (update applied), or
-- Create a short CONTRIBUTING.md, or
-- Add an MIT license and a minimal .gitignore for Quartus outputs.
+If you want, I can now:
+- Add a .gitignore tuned for Quartus outputs, or
+- Add a PINOUT / HARDWARE.md that extracts the important assignments from the .qsf into a readable format, or
+- Create simple testbench templates for `t1b_ultrasonic.v` or `uart_tx.v`.
