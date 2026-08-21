@@ -1,0 +1,51 @@
+/*
+Module: centre_aligner
+Monitors left and right ultrasonic distances during MOVE_FWD.
+Outputs a speed adjustment (offset) to keep the bot centered.
+*/
+
+module centre_aligner (
+    input  wire clk,
+    input  wire [15:0] dist_l,
+    input  wire [15:0] dist_r,
+    input  wire [2:0]  move_cmd,
+    input  wire        busy,
+    output reg  [7:0]  speed_offset_l, // Amount to slow down left motor
+    output reg  [7:0]  speed_offset_r  // Amount to slow down right motor
+);
+
+    localparam MOVE_FWD = 3'b001;
+    localparam TARGET_DIFF = 0; // Ideal difference (dist_l - dist_r)
+    localparam DEADZONE = 5;    // 5mm tolerance
+    localparam ADJUST_SENSITIVITY = 2; // Scaling factor for adjustment
+
+    wire signed [16:0] diff;
+    assign diff = $signed({1'b0, dist_l}) - $signed({1'b0, dist_r});
+
+    always @(posedge clk) begin
+        if (busy && (move_cmd == MOVE_FWD)) begin
+            // If bot is too close to the left wall (dist_l is small, dist_r is large)
+            // diff will be negative. We need to move away from left wall.
+            // Action: Speed up left motor (keep at max) and slow down right motor.
+            if (diff < -DEADZONE) begin
+                speed_offset_l <= 0;
+                speed_offset_r <= ((-diff) > 100) ? 8'd100 : ((-diff)[7:0] * ADJUST_SENSITIVITY);
+            end
+            // If bot is too close to the right wall (dist_r is small, dist_l is large)
+            // diff will be positive. We need to move away from right wall.
+            // Action: Speed up right motor (keep at max) and slow down left motor.
+            else if (diff > DEADZONE) begin
+                speed_offset_r <= 0;
+                speed_offset_l <= (diff > 100) ? 8'd100 : (diff[7:0] * ADJUST_SENSITIVITY);
+            end
+            else begin
+                speed_offset_l <= 0;
+                speed_offset_r <= 0;
+            end
+        end else begin
+            speed_offset_l <= 0;
+            speed_offset_r <= 0;
+        end
+    end
+
+endmodule
