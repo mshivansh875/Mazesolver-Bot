@@ -90,9 +90,8 @@ Demo (recorded run): Demo Video.mp4
 YouTube: https://youtu.be/hfJg5jYmMrU?si=1RFYLNTxfjBVxnvM — shows the robot navigating the maze, stopping at measuring points, dipping the moisture probe, reading DHT11, and sending data to the user.
 
 
-## Next steps I can help with
-- Produce a PINOUT / HARDWARE.md by extracting the main pin names from `t2c_maze_explorer.qsf` into a readable table.
-- Add a small testbench template for `moisture_sensor.v` or `t2a_dht.v`.
-- Add inline module documentation headers for `topmodule.v` or `move_controller.v` to make the signal flows clearer.
+## Resources & references
+- DE0-Nano manual: Resources/de0_nano_manual.pdf
+- DHT11 datasheet: Resources/DHT11-datasheet.pdf
+- Capacitive soil moisture sensor datasheet: Resources/capacitive-soil-moisture-sensor-datasheet.pdf
 
-If you want, I will now update README.md in the repository with this content.
