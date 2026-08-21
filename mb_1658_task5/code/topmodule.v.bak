@@ -1,0 +1,189 @@
+/*
+Top Module for Maze Solving Robot
+Integrated Components:
+1. Ultrasonic Sensors (Left, Mid, Right)
+2. Maze Explorer (Logic/Brain)
+3. Centre Aligner (Path Correction)
+4. Move Controller (Actuator/FSM)
+5. UART Manager (Comm & Remote Start)
+6. DHT11 Sensor (Integrated t2a_dht)
+7. L298 Driver (Motor Power)
+*/
+
+module top_module (
+    input  wire clk_50M,
+    input  wire reset_n,
+    
+    // Ultrasonic Hardware
+    input  wire echo_l, echo_m, echo_r,
+    output wire trig_l, trig_m, trig_r,
+    
+    // Motor & Encoder Hardware
+    input  wire enc_l, enc_r,
+    output wire [3:0] l298_pins, // {IN1, IN2, IN3, IN4}
+    
+    // Peripheral Hardware
+    output wire servo_pwm,
+    output wire adc_trigger,      // moisture sensor start
+    inout  wire dht_io,           // DHT11 Single-Bus
+    
+    // Communication
+    input  wire uart_rx,
+    output wire uart_tx
+);
+
+    // --- Clock Generation (50MHz to 3.125MHz for UART) ---
+    reg [3:0] clk_div;
+    reg clk_3125;
+    always @(posedge clk_50M or negedge reset_n) begin
+        if (!reset_n) begin
+            clk_div <= 0;
+            clk_3125 <= 0;
+        end else begin
+            if (clk_div == 7) begin 
+                clk_div <= 0;
+                clk_3125 <= ~clk_3125;
+            end else begin
+                clk_div <= clk_div + 1;
+            end
+        end
+    end
+
+    // --- Internal Signal Interconnects ---
+    wire [15:0] dist_l, dist_m, dist_r;
+    wire wall_l, wall_m, wall_r;
+    wire [2:0] move_cmd;
+    wire move_done, busy;
+    wire [1:0] l_ctrl, r_ctrl;
+    wire [7:0] off_l, off_r;
+    wire start_bot;
+    wire tx_busy, send_en;
+    
+    // Sensor Data Wires
+    wire [7:0] temp_val, hum_val;
+    wire dht_valid, dht_trigger_sig;
+    wire [11:0] moisture_val = 12'hABC; // Replace with ADC output when ready
+
+    // Threshold comparison: Logic 1 if wall is within 60mm
+    assign wall_l = (dist_l < 60);
+    assign wall_m = (dist_m < 60);
+    assign wall_r = (dist_r < 60);
+
+    // --- Module Instantiations ---
+
+    // 1. Ultrasonic Sensors
+    t1b_ultrasonic sensor_left  (.clk_50M(clk_50M), .reset(reset_n), .echo_rx(echo_l), .trig(trig_l), .distance_out(dist_l));
+    t1b_ultrasonic sensor_mid   (.clk_50M(clk_50M), .reset(reset_n), .echo_rx(echo_m), .trig(trig_m), .distance_out(dist_m));
+    t1b_ultrasonic sensor_right (.clk_50M(clk_50M), .reset(reset_n), .echo_rx(echo_r), .trig(trig_r), .distance_out(dist_r));
+
+    // 2. UART Manager
+    uart_manager u_comm (
+        .clk(clk_50M),
+        .clk_3125(clk_3125),
+        .rst_n(reset_n),
+        .uart_rx(uart_rx),
+        .uart_tx(uart_tx),
+        .start_bot(start_bot),
+        .send_en(send_en),
+        .moisture_data(moisture_val),
+        .temp_data(temp_val),
+        .hum_data(hum_val),
+        .tx_busy(tx_busy)
+    );
+
+    // 3. Maze Explorer Logic
+    reg logic_clk;
+    t2c_maze_explorer brain (
+        .clk(logic_clk),
+        .rst_n(reset_n),
+        .left(wall_l),
+        .mid(wall_m),
+        .right(wall_r),
+        .move(move_cmd)
+    );
+
+    // 4. Centre Aligner
+    centre_aligner aligner (
+        .clk(clk_50M),
+        .dist_l(dist_l),
+        .dist_r(dist_r),
+        .move_cmd(move_cmd),
+        .busy(busy),
+        .speed_offset_l(off_l),
+        .speed_offset_r(off_r)
+    );
+
+    // 5. Move Controller (Actuator)
+    move_controller actuator (
+        .clk(clk_50M),
+        .rst_n(reset_n),
+        .start_bot(start_bot),
+        .move_cmd(move_cmd),
+        .enc_l(enc_l),
+        .enc_r(enc_r),
+        .adc_done(1'b1),        // Manual override for ADC till connected
+        .dht_done(dht_valid),   // Senses dht_valid from t2a_dht
+        .l_motor(l_ctrl),
+        .r_motor(r_ctrl),
+        .servo_pwm(servo_pwm),
+        .adc_start(adc_trigger),
+        .dht_start(dht_trigger_sig),
+        .send_data_en(send_en),
+        .tx_busy(tx_busy),
+        .move_done(move_done),
+        .busy(busy)
+    );
+
+    // 6. DHT11 Sensor Integration
+    t2a_dht dht_inst (
+        .clk_50M(clk_50M),
+        .reset(dht_trigger_sig), // Triggered by move_controller
+        .sensor(dht_io),
+        .T_integral(temp_val),
+        .RH_integral(hum_val),
+        .T_decimal(),
+        .RH_decimal(),
+        .Checksum(),
+        .data_valid(dht_valid),
+        .state(),
+        .counter()
+    );
+
+    // 7. L298 Driver
+    l298_driver l298_inst (
+        .clk(clk_50M),
+        .l_ctrl(l_ctrl),
+        .r_ctrl(r_ctrl),
+        .speed_offset_l(off_l),
+        .speed_offset_r(off_r),
+        .l298_in(l298_pins)
+    );
+
+    // --- System Orchestration ---
+    reg [1:0] sys_state;
+    localparam S_WAIT_LOGIC = 2'b00, S_WAIT_MOVE = 2'b01;
+
+    always @(posedge clk_50M or negedge reset_n) begin
+        if (!reset_n) begin
+            sys_state <= S_WAIT_LOGIC;
+            logic_clk <= 0;
+        end else begin
+            case (sys_state)
+                S_WAIT_LOGIC: begin
+                    if (move_cmd == 3'b000) begin
+                        logic_clk <= 1;
+                    end else begin
+                        logic_clk <= 0;
+                        sys_state <= S_WAIT_MOVE;
+                    end
+                end
+                S_WAIT_MOVE: begin
+                    if (move_done) begin
+                        sys_state <= S_WAIT_LOGIC;
+                    end
+                end
+            endcase
+        end
+    end
+
+endmodule

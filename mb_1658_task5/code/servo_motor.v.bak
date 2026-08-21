@@ -1,0 +1,24 @@
+module servo_motor(
+			input clk,
+			input start_measure,
+			output reg pwm
+		);
+		localparam PERIOD = 	26'd1_000_000;
+		wire [7:0] angle;
+		wire [17:0] scaled_angle;
+		reg [19:0] counter = 0;
+		
+		assign angle = (start_measure) ? 167 : 0; // values choosen according to the datasheet not exactly means
+		assign scaled_angle = 50000 + angle*278;	// that it goes from 0 to 167 degree but it fulfills our requirements.
+		
+		always @(posedge clk) begin
+			if (counter == PERIOD) begin
+				counter <= 0;
+			end else begin
+				counter <= counter + 1;
+			end
+
+			pwm <= (counter < scaled_angle);
+		end
+		
+endmodule

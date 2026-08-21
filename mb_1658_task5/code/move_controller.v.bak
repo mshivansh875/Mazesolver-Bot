@@ -1,0 +1,145 @@
+/*
+Updated Move Controller:
+- Handshake with UART Start signal.
+- Corrected Sequence: Servo 180 (Sample ADC & Start DHT11) -> Servo 70 (UART TX) -> U-Turn.
+- Ensures DHT11 and ADC both finish before retracting probe and moving.
+*/
+
+module move_controller (
+    input wire clk,            // 50 MHz
+    input wire rst_n,
+    input wire start_bot,      // Global enable from UART RX ('S')
+    input wire [2:0] move_cmd, // From maze explorer
+    input wire enc_l, enc_r,   // Encoder feedback
+    input wire adc_done,       // Feedback from ADC controller
+    input wire dht_done,       // Feedback from DHT11 controller
+    output reg [1:0] l_motor,  
+    output reg [1:0] r_motor,  
+    output reg servo_pwm,      
+    output reg adc_start,      // Trigger moisture sampling
+    output reg dht_start,      // Trigger DHT11 sampling
+    output reg send_data_en,   // Trigger UART TX
+    input  wire tx_busy,       // Feedback from UART TX
+    output reg move_done,      
+    output reg busy            
+);
+
+    localparam STOP       = 3'b000;
+    localparam MOVE_FWD   = 3'b001;
+    localparam TURN_LEFT  = 3'b010;
+    localparam TURN_RIGHT = 3'b011;
+    localparam U_TURN     = 3'b100;
+
+    // FSM States
+    localparam IDLE         = 4'd0;
+    localparam SERVO_180    = 4'd1; // Phase 1: Probe Down + Start Sensing
+    localparam SENSE_WAIT   = 4'd2; // Phase 2: Wait for ADC & DHT11
+    localparam SERVO_70     = 4'd3; // Phase 3: Probe Up + UART TX Start
+    localparam TX_WAIT      = 4'd4; // Phase 4: Wait for UART TX
+    localparam EXEC_MOVE    = 4'd5;
+    localparam WAIT_ENCODER = 4'd6;
+    localparam FINISH       = 4'd7;
+
+    reg [3:0]  state;
+    reg [19:0] servo_cnt;
+    reg [19:0] duty_cycle;
+    reg [31:0] enc_target;
+    reg [31:0] enc_count;
+    reg        last_enc_l;
+
+    // Encoder Edge Detection
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            enc_count <= 0; last_enc_l <= 0;
+        end else begin
+            last_enc_l <= enc_l;
+            if (enc_l && !last_enc_l && state == WAIT_ENCODER) enc_count <= enc_count + 1;
+            else if (state == IDLE) enc_count <= 0;
+        end
+    end
+
+    // Servo PWM (20ms)
+    always @(posedge clk) begin
+        if (servo_cnt >= 1000000) servo_cnt <= 0;
+        else servo_cnt <= servo_cnt + 1;
+        servo_pwm <= (servo_cnt < duty_cycle);
+    end
+
+    // Main Control FSM
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            state <= IDLE; l_motor <= 2'b00; r_motor <= 2'b00;
+            duty_cycle <= 75000; adc_start <= 0; dht_start <= 0;
+            move_done <= 0; busy <= 0; send_data_en <= 0;
+        end else begin
+            case (state)
+                IDLE: begin
+                    move_done <= 0;
+                    if (start_bot && move_cmd != STOP) begin
+                        busy <= 1;
+                        if (move_cmd == U_TURN) state <= SERVO_180;
+                        else state <= EXEC_MOVE;
+                    end else begin
+                        busy <= 0;
+                        l_motor <= 2'b00; r_motor <= 2'b00;
+                    end
+                end
+
+                // Step 1: Move to 180 degrees and trigger BOTH sensors
+                SERVO_180: begin
+                    duty_cycle <= 105000; // 2.1ms (180 deg)
+                    if (servo_cnt == 999999) begin 
+                        adc_start <= 1;
+                        dht_start <= 1; // Start DHT11 in parallel with ADC
+                        state <= SENSE_WAIT;
+                    end
+                end
+
+                // Step 2: Wait for both Moisture and DHT11 results
+                SENSE_WAIT: begin
+                    adc_start <= 0;
+                    dht_start <= 0;
+                    if (adc_done ) state <= SERVO_70;
+                end
+
+                // Step 3: Retract probe and start data transmission
+                SERVO_70: begin
+                    duty_cycle <= 65000; // 1.3ms (70 deg)
+                    if (servo_cnt == 999999) begin
+                        send_data_en <= 1; // Trigger UART packetizing
+                        state <= EXEC_MOVE;
+                    end
+                end
+
+                //data can be sent in parallel while moving 
+                
+
+                EXEC_MOVE: begin
+                    send_data_en <= 0;
+                    case (move_cmd)
+                        MOVE_FWD:   begin l_motor <= 2'b10; r_motor <= 2'b10; enc_target <= 500; end
+                        TURN_LEFT:  begin l_motor <= 2'b01; r_motor <= 2'b10; enc_target <= 250; end
+                        TURN_RIGHT: begin l_motor <= 2'b10; r_motor <= 2'b01; enc_target <= 250; end
+                        U_TURN:     begin l_motor <= 2'b10; r_motor <= 2'b01; enc_target <= 500; end
+                    endcase
+                    state <= WAIT_ENCODER;
+                end
+
+                WAIT_ENCODER: begin
+                    if (enc_count >= enc_target) begin
+                        l_motor <= 2'b00; r_motor <= 2'b00;
+                        state <= FINISH;
+                    end
+                end
+
+                FINISH: begin
+                    move_done <= 1;
+                    busy <= 0;
+                    if (move_cmd == STOP) state <= IDLE;
+                end
+
+                default: state <= IDLE;
+            endcase
+        end
+    end
+endmodule
